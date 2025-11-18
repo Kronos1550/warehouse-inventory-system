@@ -1,0 +1,797 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <meta name="theme-color" content="#2563eb">
+    <title>Warehouse Inventory</title>
+    <link rel="manifest" href="data:application/json;base64,eyJuYW1lIjoiV2FyZWhvdXNlIEludmVudG9yeSIsInNob3J0X25hbWUiOiJXYXJlaG91c2UiLCJzdGFydF91cmwiOiIuIiwiZGlzcGxheSI6InN0YW5kYWxvbmUiLCJiYWNrZ3JvdW5kX2NvbG9yIjoiI2ZmZmZmZiIsInRoZW1lX2NvbG9yIjoiIzI1NjNlYiIsImljb25zIjpbeyJzcmMiOiJkYXRhOmltYWdlL3N2Zyt4bWw7YmFzZTY0LFBITjJaeUI0Yld4dWN6MGlhSFIwY0RvdkwzZDNkeTUzTXk1dmNtY3ZNakF3TUM5emRtY2lJSFpwWlhkQ2IzZzlJakFnTUNBeU5DQXlOQ0krUEhCaGRHZ2daajBpVFRJd0lEZHNMVGdnTkd3eElERXVOemcxTFRJdU16RTFJREV1T0RrNFRERXVNVFlnTlM0d016TTNNRFV1TXpRNElEVXVNRE16VERVdU16UTRJRFl1TnpJeU16QTBiQzB6TGpJNE5TQXpMakk0TlV3MElEY3VNekF6VFRJd0lEZGpNQ0F5TGpJd055QXhMamM1TWlBeUxqSTJNaUF6TGpNNU5DQXlMakkyTWlBeUxqSTJOQ0F3SURBdExqVTFOaTB4TGpBd055QXhMakF3TnkweExqVTFObDBpSUhOMGNtOXJaVDBpSTJabVppSWdjM1J5YjJ0bExYZHBaSFJvUFNJeUlpOCtQQzl6ZG1jKyIsInNpemVzIjoiNTEyeDUxMiIsInR5cGUiOiJpbWFnZS9zdmcreG1sIn1dfQ==">
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/dexie@3.2.4/dist/dexie.min.js"></script>
+    <style>
+        body { 
+            margin: 0; 
+            padding: 0; 
+            -webkit-tap-highlight-color: transparent;
+            touch-action: manipulation;
+            overscroll-behavior: contain;
+        }
+        button, input, select {
+            touch-action: manipulation;
+            -webkit-tap-highlight-color: transparent;
+        }
+        /* Prevent zoom on input focus */
+        input[type="text"],
+        input[type="number"],
+        input[type="email"],
+        select {
+            font-size: 16px;
+        }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+    
+    <script type="text/babel">
+        const { useState, useRef, useEffect } = React;
+        
+        // IndexedDB Setup with Dexie
+        const db = new Dexie('WarehouseInventoryDB');
+        
+        db.version(1).stores({
+            users: 'id, email, role',
+            categories: 'id, name',
+            units: 'id, shortCode',
+            items: 'id, sku, upc, description',
+            locations: 'id, code',
+            inventoryBalances: 'id, [itemId+locationId], itemId, locationId',
+            minMaxLevels: 'id, [itemId+locationId]',
+            transactions: '++id, itemId, locationId, createdAt',
+            countSessions: '++id, locationId, status',
+            countLines: '++id, sessionId',
+            settings: 'key'
+        });
+
+        // Initialize database with seed data
+        const initializeDatabase = async () => {
+            const userCount = await db.users.count();
+            if (userCount > 0) return; // Already initialized
+
+            console.log('Initializing database with seed data...');
+
+            // Users
+            await db.users.bulkAdd([
+                { id: '1', email: 'admin@warehouse.com', displayName: 'Admin User', role: 'ADMIN', isActive: true },
+                { id: '2', email: 'manager@warehouse.com', displayName: 'Manager User', role: 'MANAGER', isActive: true },
+                { id: '3', email: 'clerk@warehouse.com', displayName: 'Clerk User', role: 'CLERK', isActive: true }
+            ]);
+
+            // Categories
+            await db.categories.bulkAdd([
+                { id: '1', name: 'Electronics', isActive: true },
+                { id: '2', name: 'Hardware', isActive: true },
+                { id: '3', name: 'Tools', isActive: true },
+                { id: '4', name: 'Supplies', isActive: true }
+            ]);
+
+            // Units
+            await db.units.bulkAdd([
+                { id: '1', name: 'Each', shortCode: 'EA' },
+                { id: '2', name: 'Case', shortCode: 'CS' },
+                { id: '3', name: 'Pallet', shortCode: 'PLT' }
+            ]);
+
+            // Items
+            await db.items.bulkAdd([
+                { id: '1', sku: 'WIDGET-001', upc: '123456789012', description: 'Premium Widget A', categoryId: '1', unitId: '1', isActive: true },
+                { id: '2', sku: 'BOLT-500', upc: '234567890123', description: 'Hex Bolt 1/2"', categoryId: '2', unitId: '2', isActive: true },
+                { id: '3', sku: 'DRILL-X200', upc: '345678901234', description: 'Cordless Drill 20V', categoryId: '3', unitId: '1', isActive: true },
+                { id: '4', sku: 'TAPE-50', upc: '456789012345', description: 'Packing Tape 2"', categoryId: '4', unitId: '2', isActive: true },
+                { id: '5', sku: 'SENSOR-A1', upc: '567890123456', description: 'Motion Sensor Pro', categoryId: '1', unitId: '1', isActive: true }
+            ]);
+
+            // Locations
+            await db.locations.bulkAdd([
+                { id: '1', code: 'A-01', name: 'Aisle A - Bay 1', isActive: true },
+                { id: '2', code: 'A-02', name: 'Aisle A - Bay 2', isActive: true },
+                { id: '3', code: 'B-01', name: 'Aisle B - Bay 1', isActive: true },
+                { id: '4', code: 'B-02', name: 'Aisle B - Bay 2', isActive: true }
+            ]);
+
+            // Inventory Balances
+            await db.inventoryBalances.bulkAdd([
+                { id: '1', itemId: '1', locationId: '1', qtyOnHand: 150 },
+                { id: '2', itemId: '2', locationId: '1', qtyOnHand: 500 },
+                { id: '3', itemId: '3', locationId: '2', qtyOnHand: 25 },
+                { id: '4', itemId: '4', locationId: '3', qtyOnHand: 200 },
+                { id: '5', itemId: '5', locationId: '2', qtyOnHand: 75 }
+            ]);
+
+            // Min/Max Levels
+            await db.minMaxLevels.bulkAdd([
+                { id: '1', itemId: '1', locationId: '1', minQty: 100, maxQty: 300 },
+                { id: '2', itemId: '2', locationId: '1', minQty: 250, maxQty: 1000 },
+                { id: '3', itemId: '3', locationId: '2', minQty: 10, maxQty: 50 }
+            ]);
+
+            console.log('✓ Database initialized successfully');
+        };
+
+        // Database helper functions
+        const AppStorage = {
+            async getItems() {
+                return await db.items.where('isActive').equals(true).toArray();
+            },
+            async getLocations() {
+                return await db.locations.where('isActive').equals(true).toArray();
+            },
+            async findItemBySku(sku) {
+                return await db.items.where('sku').equalsIgnoreCase(sku).and(i => i.isActive).first();
+            },
+            async getBalance(itemId, locationId) {
+                return await db.inventoryBalances.where('[itemId+locationId]').equals([itemId, locationId]).first();
+            },
+            async createTransaction(txn) {
+                const id = await db.transactions.add({
+                    ...txn,
+                    createdAt: new Date().toISOString()
+                });
+                return { id, ...txn };
+            },
+            async updateBalance(itemId, locationId, qtyDelta) {
+                const balance = await this.getBalance(itemId, locationId);
+                if (balance) {
+                    await db.inventoryBalances.update(balance.id, {
+                        qtyOnHand: balance.qtyOnHand + qtyDelta
+                    });
+                    return await db.inventoryBalances.get(balance.id);
+                } else {
+                    const id = await db.inventoryBalances.add({
+                        itemId,
+                        locationId,
+                        qtyOnHand: Math.max(0, qtyDelta)
+                    });
+                    return await db.inventoryBalances.get(id);
+                }
+            },
+            async getUnits() {
+                return await db.units.toArray();
+            }
+        };
+
+        // Icons
+        const PackageIcon = () => (
+            <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
+            </svg>
+        );
+        
+        const UploadIcon = () => (
+            <svg className="w-12 h-12" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+            </svg>
+        );
+        
+        const LogOutIcon = () => (
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+            </svg>
+        );
+        
+        const DownloadIcon = () => (
+            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+            </svg>
+        );
+        
+        const MapPinIcon = () => (
+            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+            </svg>
+        );
+        
+        const CheckCircleIcon = () => (
+            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+        );
+        
+        const AlertCircleIcon = () => (
+            <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+        );
+        
+        const ClockIcon = () => (
+            <svg className="w-6 h-6 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+        );
+
+        // Main App
+        function WarehouseInventoryApp() {
+          const [currentUser, setCurrentUser] = useState(null);
+          const [currentView, setCurrentView] = useState('login');
+          const [viewData, setViewData] = useState({});
+          const [dbReady, setDbReady] = useState(false);
+
+          useEffect(() => {
+            initializeDatabase().then(() => setDbReady(true));
+          }, []);
+
+          const navigate = (view, data = {}) => {
+            setCurrentView(view);
+            setViewData(data);
+          };
+
+          if (!dbReady) {
+            return (
+              <div className="min-h-screen bg-blue-600 flex items-center justify-center">
+                <div className="text-white text-center">
+                  <ClockIcon />
+                  <p className="mt-4 text-xl">Initializing database...</p>
+                </div>
+              </div>
+            );
+          }
+
+          if (!currentUser) {
+            return <LoginView onLogin={(user) => { setCurrentUser(user); navigate('dashboard'); }} />;
+          }
+
+          return (
+            <div className="min-h-screen bg-gray-50">
+              <header className="bg-blue-600 text-white shadow-lg sticky top-0 z-50">
+                <div className="max-w-7xl mx-auto px-4 py-4 flex justify-between items-center">
+                  <div className="flex items-center gap-3">
+                    <PackageIcon />
+                    <h1 className="text-xl font-bold">Warehouse Inventory</h1>
+                  </div>
+                  <div className="flex items-center gap-4">
+                    <div className="text-right">
+                      <p className="font-semibold text-sm">{currentUser.displayName}</p>
+                      <p className="text-xs text-blue-200">{currentUser.role}</p>
+                    </div>
+                    <button onClick={() => { setCurrentUser(null); setCurrentView('login'); }} className="p-3 hover:bg-blue-700 rounded-lg">
+                      <LogOutIcon />
+                    </button>
+                  </div>
+                </div>
+              </header>
+
+              <main className="max-w-7xl mx-auto px-4 py-6">
+                {currentView === 'dashboard' && <DashboardView user={currentUser} onNavigate={navigate} />}
+                {currentView === 'bulk-upload' && <BulkUploadView user={currentUser} onNavigate={navigate} />}
+              </main>
+            </div>
+          );
+        }
+
+        // Login
+        function LoginView({ onLogin }) {
+          const [users, setUsers] = useState([]);
+
+          useEffect(() => {
+            db.users.toArray().then(setUsers);
+          }, []);
+
+          const quickLogin = (user) => {
+            onLogin(user);
+          };
+
+          return (
+            <div className="min-h-screen bg-gradient-to-br from-blue-500 to-blue-700 flex items-center justify-center p-4">
+              <div className="bg-white rounded-2xl shadow-2xl p-8 w-full max-w-md">
+                <div className="flex items-center justify-center mb-8">
+                  <div className="w-16 h-16 text-blue-600">
+                    <PackageIcon />
+                  </div>
+                </div>
+                <h2 className="text-3xl font-bold text-center text-gray-800 mb-8">Warehouse Inventory</h2>
+                <div className="space-y-3">
+                  {users.filter(u => u.role === 'ADMIN').map(user => (
+                    <button key={user.id} onClick={() => quickLogin(user)} className="w-full px-6 py-4 bg-purple-600 text-white rounded-lg font-semibold hover:bg-purple-700 text-lg">
+                      🔐 {user.displayName}
+                    </button>
+                  ))}
+                  {users.filter(u => u.role === 'MANAGER').map(user => (
+                    <button key={user.id} onClick={() => quickLogin(user)} className="w-full px-6 py-4 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 text-lg">
+                      👔 {user.displayName}
+                    </button>
+                  ))}
+                  {users.filter(u => u.role === 'CLERK').map(user => (
+                    <button key={user.id} onClick={() => quickLogin(user)} className="w-full px-6 py-4 bg-green-600 text-white rounded-lg font-semibold hover:bg-green-700 text-lg">
+                      📦 {user.displayName}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          );
+        }
+
+        // Dashboard
+        function DashboardView({ user, onNavigate }) {
+          return (
+            <div className="space-y-6">
+              <h2 className="text-2xl font-bold">Welcome, {user.displayName}!</h2>
+              <div className="grid grid-cols-1 gap-6">
+                <button onClick={() => onNavigate('bulk-upload')} className="bg-orange-50 hover:bg-orange-100 text-orange-600 p-8 rounded-xl text-left">
+                  <UploadIcon />
+                  <h3 className="text-2xl font-bold mb-2 mt-4">Bulk Upload CSV</h3>
+                  <p className="text-gray-600">Upload inventory from CSV file</p>
+                </button>
+              </div>
+            </div>
+          );
+        }
+
+        // Bulk Upload View - CONTINUED IN NEXT PART
+        function BulkUploadView({ user, onNavigate }) {
+          const [file, setFile] = useState(null);
+          const [selectedLocation, setSelectedLocation] = useState('');
+          const [locations, setLocations] = useState([]);
+          const [uploadStatus, setUploadStatus] = useState(null);
+          const [uploadResults, setUploadResults] = useState(null);
+          const [previewData, setPreviewData] = useState(null);
+          const fileInputRef = useRef(null);
+
+          useEffect(() => {
+            AppStorage.getLocations().then(setLocations);
+          }, []);
+
+          const handleFileSelect = () => {
+            fileInputRef.current?.click();
+          };
+
+          const downloadTemplate = () => {
+            const csv = `Item Number and Description,Quantity and Unit
+WIDGET-001 - Premium Widget A,250 EA
+BOLT-500 - Hex Bolt 1/2",500 CS
+DRILL-X200 - Cordless Drill 20V,30 EA
+TAPE-50 - Packing Tape 2",200 CS
+SENSOR-A1 - Motion Sensor Pro,75 EA`;
+            const blob = new Blob([csv], { type: 'text/csv' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'inventory_upload_template.csv';
+            a.click();
+            URL.revokeObjectURL(url);
+          };
+
+          const parseCSVLine = (line) => {
+            const result = [];
+            let current = '';
+            let inQuotes = false;
+            
+            for (let i = 0; i < line.length; i++) {
+              const char = line[i];
+              if (char === '"') {
+                inQuotes = !inQuotes;
+              } else if (char === ',' && !inQuotes) {
+                result.push(current.trim());
+                current = '';
+              } else {
+                current += char;
+              }
+            }
+            result.push(current.trim());
+            return result;
+          };
+
+          const handlePreview = async () => {
+            if (!file) return;
+
+            try {
+              const text = await file.text();
+              const lines = text.split(/\r?\n/).filter(line => line.trim() && line.trim().length > 0);
+              
+              if (lines.length < 2) {
+                alert('CSV file must contain at least a header row and one data row');
+                return;
+              }
+
+              const dataLines = lines.slice(1);
+              const preview = [];
+
+              for (let i = 0; i < Math.min(dataLines.length, 10); i++) {
+                const lineNumber = i + 2;
+                const cols = parseCSVLine(dataLines[i]);
+                
+                if (cols.length >= 2) {
+                  const itemColumn = cols[0].trim();
+                  const qtyColumn = cols[1].trim();
+                  
+                  const itemParts = itemColumn.split(' - ');
+                  const itemNumber = itemParts[0]?.trim() || '';
+                  const description = itemParts.length >= 2 ? itemParts.slice(1).join(' - ').trim() : '';
+                  
+                  const qtyParts = qtyColumn.trim().split(/\s+/);
+                  const quantity = qtyParts[0] || '';
+                  const unit = qtyParts[1] || '';
+                  
+                  preview.push({
+                    lineNumber,
+                    itemNumber,
+                    description,
+                    quantity,
+                    unit,
+                    columnCount: cols.length,
+                    hasEnoughCols: cols.length >= 2,
+                    raw: dataLines[i]
+                  });
+                } else {
+                  preview.push({
+                    lineNumber,
+                    itemNumber: cols[0] || '',
+                    description: '',
+                    quantity: '',
+                    unit: '',
+                    columnCount: cols.length,
+                    hasEnoughCols: false,
+                    raw: dataLines[i]
+                  });
+                }
+              }
+
+              setPreviewData({
+                totalRows: dataLines.length,
+                previewRows: preview
+              });
+            } catch (error) {
+              alert('Error reading file: ' + error.message);
+            }
+          };
+
+          const handleUpload = async () => {
+            if (!file || !selectedLocation) return;
+
+            setUploadStatus('processing');
+            setUploadResults(null);
+
+            try {
+              const text = await file.text();
+              const lines = text.split(/\r?\n/).filter(line => line.trim() && line.trim().length > 0);
+              
+              if (lines.length < 2) {
+                throw new Error('CSV file must contain at least a header row and one data row');
+              }
+
+              const dataLines = lines.slice(1);
+              const units = await AppStorage.getUnits();
+              
+              const results = {
+                success: [],
+                errors: [],
+                totalProcessed: 0
+              };
+
+              for (let i = 0; i < dataLines.length; i++) {
+                const lineNumber = i + 2;
+                const cols = parseCSVLine(dataLines[i]);
+                
+                try {
+                  if (cols.length < 2) {
+                    throw new Error(`Invalid format - expected at least 2 columns, found ${cols.length}`);
+                  }
+
+                  const itemColumn = cols[0].trim();
+                  const qtyColumn = cols[1].trim();
+
+                  const itemParts = itemColumn.split(' - ');
+                  const itemNumber = itemParts[0]?.trim();
+                  const description = itemParts.length >= 2 ? itemParts.slice(1).join(' - ').trim() : '';
+
+                  if (!itemNumber) {
+                    throw new Error('Could not extract item number from first column');
+                  }
+
+                  const qtyParts = qtyColumn.trim().split(/\s+/);
+                  const quantityStr = qtyParts[0] || '';
+                  const unitCode = qtyParts[1]?.toUpperCase() || '';
+
+                  const quantity = parseInt(quantityStr, 10);
+                  if (isNaN(quantity) || quantity < 0) {
+                    throw new Error(`Invalid quantity: "${quantityStr}"`);
+                  }
+
+                  const item = await AppStorage.findItemBySku(itemNumber);
+                  if (!item) {
+                    throw new Error(`Item not found: ${itemNumber}`);
+                  }
+
+                  if (unitCode) {
+                    const itemUnit = units.find(u => u.id === item.unitId);
+                    if (itemUnit && itemUnit.shortCode !== unitCode) {
+                      throw new Error(`Unit mismatch: expected ${itemUnit.shortCode}, got ${unitCode}`);
+                    }
+                  }
+
+                  const currentBalance = await AppStorage.getBalance(item.id, selectedLocation);
+                  const currentQty = currentBalance ? currentBalance.qtyOnHand : 0;
+                  const delta = quantity - currentQty;
+
+                  if (delta !== 0) {
+                    await AppStorage.createTransaction({
+                      itemId: item.id,
+                      locationId: selectedLocation,
+                      qtyDelta: delta,
+                      txnType: 'BULK_UPLOAD',
+                      reasonCode: 'BULK_UPLOAD',
+                      userId: user.id,
+                      notes: `Bulk upload from ${file.name}`
+                    });
+
+                    await AppStorage.updateBalance(item.id, selectedLocation, delta);
+                  }
+
+                  results.success.push({
+                    line: lineNumber,
+                    sku: item.sku,
+                    description: item.description,
+                    previousQty: currentQty,
+                    newQty: quantity,
+                    delta: delta
+                  });
+                } catch (error) {
+                  results.errors.push({
+                    line: lineNumber,
+                    error: error.message,
+                    raw: cols.join(',')
+                  });
+                }
+              }
+
+              results.totalProcessed = results.success.length + results.errors.length;
+              setUploadResults(results);
+              setUploadStatus('success');
+
+            } catch (error) {
+              setUploadStatus('error');
+              setUploadResults({
+                success: [],
+                errors: [{ line: 0, error: error.message, raw: '' }],
+                totalProcessed: 0
+              });
+            }
+          };
+
+          const handleReset = () => {
+            setFile(null);
+            setSelectedLocation('');
+            setUploadStatus(null);
+            setUploadResults(null);
+            setPreviewData(null);
+            if (fileInputRef.current) {
+              fileInputRef.current.value = '';
+            }
+          };
+
+          return (
+            <div className="space-y-8 pb-32">
+              <button onClick={() => onNavigate('dashboard')} className="text-blue-600 text-lg flex items-center gap-2">
+                ← Back to Dashboard
+              </button>
+              
+              <div className="flex items-center gap-3">
+                <UploadIcon />
+                <h2 className="text-2xl font-bold">Bulk Upload CSV</h2>
+              </div>
+
+              <div className="bg-white p-6 rounded-xl shadow-lg space-y-6">
+                <div>
+                  <label className="block font-bold text-lg mb-3 flex items-center gap-2">
+                    <MapPinIcon />
+                    1. Select Location
+                  </label>
+                  <select
+                    value={selectedLocation}
+                    onChange={(e) => setSelectedLocation(e.target.value)}
+                    disabled={uploadStatus === 'processing'}
+                    className="w-full p-4 border-2 rounded-lg text-lg focus:border-blue-500 focus:outline-none disabled:bg-gray-100"
+                  >
+                    <option value="">Choose a location...</option>
+                    {locations.map(loc => (
+                      <option key={loc.id} value={loc.id}>{loc.code} - {loc.name}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block font-bold text-lg mb-3 flex items-center gap-2">
+                    <DownloadIcon />
+                    2. Download Template
+                  </label>
+                  <button
+                    onClick={downloadTemplate}
+                    className="w-full p-5 bg-blue-600 text-white rounded-lg text-lg font-bold hover:bg-blue-700 transition flex items-center justify-center gap-3"
+                  >
+                    <DownloadIcon />
+                    Download CSV Template
+                  </button>
+                </div>
+
+                <div>
+                  <label className="block font-bold text-lg mb-3">
+                    3. Select CSV File
+                  </label>
+                  <button
+                    onClick={handleFileSelect}
+                    disabled={uploadStatus === 'processing'}
+                    className="w-full p-5 bg-purple-600 text-white rounded-lg text-lg font-bold hover:bg-purple-700 transition disabled:bg-gray-300"
+                  >
+                    📁 Choose File
+                  </button>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept=".csv"
+                    onChange={(e) => {
+                      setFile(e.target.files?.[0] || null);
+                      setPreviewData(null);
+                    }}
+                    className="hidden"
+                  />
+                  {file && (
+                    <div className="mt-4 p-4 bg-green-50 border-2 border-green-200 rounded-lg">
+                      <div className="flex items-center gap-3 mb-3">
+                        <CheckCircleIcon />
+                        <div>
+                          <p className="font-bold text-green-800">{file.name}</p>
+                          <p className="text-sm text-green-600">{(file.size / 1024).toFixed(2)} KB</p>
+                        </div>
+                      </div>
+                      <button
+                        onClick={handlePreview}
+                        className="w-full p-3 bg-blue-600 text-white rounded-lg font-bold hover:bg-blue-700 transition"
+                      >
+                        👁️ Preview Parsed Data
+                      </button>
+                    </div>
+                  )}
+                </div>
+
+                {previewData && (
+                  <div className="bg-blue-50 p-4 rounded-xl">
+                    <h3 className="font-bold text-lg mb-3">📋 Preview (first 10 of {previewData.totalRows} rows)</h3>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-sm">
+                        <thead>
+                          <tr className="bg-blue-100">
+                            <th className="p-2 text-left">Line</th>
+                            <th className="p-2 text-left">Item #</th>
+                            <th className="p-2 text-left">Desc</th>
+                            <th className="p-2 text-right">Qty</th>
+                            <th className="p-2 text-left">Unit</th>
+                            <th className="p-2 text-center">✓</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {previewData.previewRows.map((row, idx) => (
+                            <tr key={idx} className={!row.hasEnoughCols ? 'bg-red-100' : 'bg-white'}>
+                              <td className="p-2 border text-xs">{row.lineNumber}</td>
+                              <td className="p-2 border font-mono text-blue-600 font-bold text-xs">{row.itemNumber}</td>
+                              <td className="p-2 border text-gray-600 text-xs">{row.description}</td>
+                              <td className="p-2 border text-right font-bold text-xs">{row.quantity}</td>
+                              <td className="p-2 border text-gray-600 text-xs">{row.unit}</td>
+                              <td className={`p-2 border text-center text-xs ${!row.hasEnoughCols ? 'text-red-600 font-bold' : 'text-green-600'}`}>
+                                {row.hasEnoughCols ? '✓' : '✗'}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+
+                <div>
+                  <label className="block font-bold text-lg mb-3">
+                    4. Process Upload
+                  </label>
+                  <button
+                    onClick={handleUpload}
+                    disabled={!file || !selectedLocation || uploadStatus === 'processing'}
+                    className="w-full p-5 bg-green-600 text-white rounded-lg text-lg font-bold hover:bg-green-700 transition disabled:bg-gray-300 disabled:cursor-not-allowed"
+                  >
+                    {uploadStatus === 'processing' ? (
+                      <>
+                        <ClockIcon />
+                        Processing...
+                      </>
+                    ) : (
+                      '📤 Upload and Process CSV'
+                    )}
+                  </button>
+                </div>
+              </div>
+
+              {uploadResults && (
+                <div className="bg-white p-6 rounded-xl shadow-lg space-y-6">
+                  <h3 className="text-xl font-bold flex items-center gap-3">
+                    {uploadResults.errors.length === 0 ? (
+                      <>
+                        <CheckCircleIcon />
+                        Upload Complete!
+                      </>
+                    ) : (
+                      <>
+                        <AlertCircleIcon />
+                        Upload Complete with Errors
+                      </>
+                    )}
+                  </h3>
+
+                  <div className="grid grid-cols-3 gap-4">
+                    <div className="bg-blue-50 p-4 rounded-lg text-center">
+                      <p className="text-2xl font-bold text-blue-600">{uploadResults.totalProcessed}</p>
+                      <p className="text-xs text-gray-600">Total</p>
+                    </div>
+                    <div className="bg-green-50 p-4 rounded-lg text-center">
+                      <p className="text-2xl font-bold text-green-600">{uploadResults.success.length}</p>
+                      <p className="text-xs text-gray-600">Success</p>
+                    </div>
+                    <div className="bg-red-50 p-4 rounded-lg text-center">
+                      <p className="text-2xl font-bold text-red-600">{uploadResults.errors.length}</p>
+                      <p className="text-xs text-gray-600">Errors</p>
+                    </div>
+                  </div>
+
+                  {uploadResults.success.length > 0 && (
+                    <div>
+                      <h4 className="font-bold mb-2 text-green-700">✓ Successfully Processed</h4>
+                      <div className="max-h-96 overflow-y-auto space-y-2">
+                        {uploadResults.success.map((item, idx) => (
+                          <div key={idx} className="bg-green-50 p-3 rounded-lg text-sm">
+                            <p className="font-semibold">{item.sku} - {item.description}</p>
+                            <p className="text-gray-600">
+                              {item.previousQty} → {item.newQty} 
+                              <span className={item.delta >= 0 ? 'text-green-600 font-bold' : 'text-red-600 font-bold'}>
+                                {item.delta >= 0 ? ' (+' : ' ('}
+                                {item.delta})
+                              </span>
+                            </p>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {uploadResults.errors.length > 0 && (
+                    <div>
+                      <h4 className="font-bold mb-2 text-red-700">✗ Errors</h4>
+                      <div className="max-h-96 overflow-y-auto space-y-2">
+                        {uploadResults.errors.map((err, idx) => (
+                          <div key={idx} className="bg-red-50 p-3 rounded-lg text-sm border-l-4 border-red-500">
+                            <p className="font-semibold text-red-800">Line {err.line}: {err.error}</p>
+                            {err.raw && <p className="text-gray-600 font-mono text-xs mt-1">{err.raw}</p>}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  <button
+                    onClick={handleReset}
+                    className="w-full p-4 bg-blue-600 text-white rounded-lg text-lg font-bold hover:bg-blue-700 transition"
+                  >
+                    Upload Another File
+                  </button>
+                </div>
+              )}
+            </div>
+          );
+        }
+        
+        ReactDOM.render(<WarehouseInventoryApp />, document.getElementById('root'));
+    </script>
+</body>
+</html>
