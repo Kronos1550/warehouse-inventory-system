@@ -1,0 +1,32 @@
+# Node modules (if we add any)
+node_modules/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Test files
+test-data/
+*.test.csv
+
+# Cache
+.cache/
+.npm/
+.npm-global/
+.config/
+.local/
+
+# Logs
+*.log
+npm-debug.log*
+
+# Environment variables
+.env
+.env.local
